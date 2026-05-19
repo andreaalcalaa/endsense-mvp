@@ -1,4 +1,5 @@
 import os
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
@@ -17,17 +18,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.markdown(
-"""
+
+def html_block(html: str):
+    cleaned = "".join(line.strip() for line in html.strip().splitlines())
+    st.markdown(cleaned, unsafe_allow_html=True)
+
+
+html_block("""
 <style>
 .main { background-color: #0b1020; }
-
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-    max-width: 1400px;
-}
-
+.block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 1400px; }
 h1, h2, h3 { color: #f4f7fb; }
 
 .card {
@@ -37,6 +37,40 @@ h1, h2, h3 { color: #f4f7fb; }
     padding: 24px 28px;
     margin-bottom: 18px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+}
+
+.hero {
+    background: linear-gradient(135deg, #111827 0%, #0f172a 55%, #172554 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 28px;
+    padding: 34px 38px;
+    margin-bottom: 2rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+.hero-kicker {
+    color:#93c5fd;
+    font-size:0.82rem;
+    font-weight:800;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    margin-bottom:12px;
+}
+
+.hero-title {
+    font-size:3.4rem;
+    font-weight:850;
+    color:#f8fafc;
+    letter-spacing:-1.5px;
+    line-height:1;
+    margin-bottom:14px;
+}
+
+.hero-subtitle {
+    color:#cbd5e1;
+    font-size:1.15rem;
+    line-height:1.6;
+    max-width:760px;
 }
 
 .card-title {
@@ -120,6 +154,18 @@ h1, h2, h3 { color: #f4f7fb; }
     padding: 18px;
 }
 
+.loading-box {
+    background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px;
+    padding: 20px 24px;
+    margin-top: 18px;
+    margin-bottom: 18px;
+    color: #cbd5e1;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
 div.stButton > button:first-child {
     height: 3.2rem;
     border-radius: 14px;
@@ -127,9 +173,7 @@ div.stButton > button:first-child {
     font-weight: 700;
 }
 </style>
-""",
-unsafe_allow_html=True
-)
+""")
 
 
 # =========================
@@ -149,9 +193,24 @@ with st.sidebar:
     studies_df = pd.read_csv(studies_path)
     study_options = studies_df["study_id"].tolist()
 
+    def format_study_label(study_id):
+        row = studies_df[studies_df["study_id"] == study_id].iloc[0]
+        priority = row["priority"]
+        status = row["status"]
+
+        if priority == "Alta":
+            icon = "🔴"
+        elif priority == "Media":
+            icon = "🟡"
+        else:
+            icon = "🟢"
+
+        return f"{icon} {study_id} · {status}"
+
     selected_study_id = st.selectbox(
-        "Seleccionar estudio",
+        "Lista de revisión",
         study_options,
+        format_func=format_study_label,
         key="study_selectbox"
     )
 
@@ -163,6 +222,7 @@ with st.sidebar:
     study_id = selected_study["study_id"]
     upload_date = selected_study["upload_date"]
     study_status = selected_study["status"]
+    study_priority = selected_study["priority"]
 
     sequence = st.selectbox(
         "Secuencia MRI",
@@ -178,18 +238,15 @@ with st.sidebar:
 # HEADER
 # =========================
 
-header_html = f"""
-<div style="margin-bottom: 2.2rem;">
-    <div style="font-size: 4rem; font-weight: 800; color: #f8fafc; letter-spacing: -2px; line-height: 1;">
-        ENDSENSE
-    </div>
-    <div style="color: #94a3b8; font-size: 1.2rem; margin-top: 0.8rem;">
-        Plataforma de apoyo para revisión clínica de MRI pélvico
+html_block("""
+<div class="hero">
+    <div class="hero-kicker">Clinical Review Dashboard</div>
+    <div class="hero-title">Endsense</div>
+    <div class="hero-subtitle">
+        Plataforma de apoyo para priorización y revisión clínica de estudios MRI pélvicos.
     </div>
 </div>
-"""
-
-st.markdown(header_html, unsafe_allow_html=True)
+""")
 
 
 # =========================
@@ -199,32 +256,30 @@ st.markdown(header_html, unsafe_allow_html=True)
 overview_col1, overview_col2 = st.columns([1, 2])
 
 with overview_col1:
-    pending_card_html = f"""
-<div class="card">
-    <div class="card-title">Estudios pendientes</div>
-    <div class="card-value">{len(studies_df)}</div>
-</div>
-"""
-    st.markdown(pending_card_html, unsafe_allow_html=True)
+    html_block(f"""
+    <div class="card">
+        <div class="card-title">Estudios pendientes</div>
+        <div class="card-value">{len(studies_df)}</div>
+    </div>
+    """)
 
 with overview_col2:
-    study_card_html = f"""
-<div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
-        <div>
-            <div class="card-title">ESTUDIO ACTIVO</div>
-            <div class="card-value">{study_id}</div>
+    html_block(f"""
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
+            <div>
+                <div class="card-title">ESTUDIO ACTIVO</div>
+                <div class="card-value">{study_id}</div>
+            </div>
+            <div style="background:#1e293b; padding:12px 18px; border-radius:14px; color:#cbd5e1; font-weight:700; font-size:0.95rem;">
+                {study_status} · Prioridad {study_priority}
+            </div>
         </div>
-        <div style="background:#1e293b; padding:12px 18px; border-radius:14px; color:#cbd5e1; font-weight:700; font-size:0.95rem;">
-            {study_status}
+        <div style="color:#94a3b8; font-size:1rem; margin-top:8px;">
+            MRI pélvico · Secuencia {sequence} · Cargado {upload_date}
         </div>
     </div>
-    <div style="color:#94a3b8; font-size:1rem; margin-top:8px;">
-        MRI pélvico · Secuencia {sequence} · Cargado {upload_date}
-    </div>
-</div>
-"""
-    st.markdown(study_card_html, unsafe_allow_html=True)
+    """)
 
 
 analyze_button = st.button(
@@ -260,69 +315,102 @@ if analyze_button:
             st.error("No se puede procesar este estudio porque faltan archivos requeridos.")
             for msg in missing_required:
                 st.write(msg)
+
         else:
-            with st.spinner("Procesando estudio..."):
-                mri_img, mri_data = load_nifti(mri_path)
-                ut_img, _ = load_nifti(ut_path)
-                _, ut_data = resample_mask_to_mri(ut_img, mri_img)
+            progress_bar = st.progress(0)
+            status_text = st.empty()
 
-                ut_slices = get_relevant_slices(ut_data)
-                ut_slice_list = ut_slices["all"] if ut_slices else []
-
-                em_data = None
-                em_slices = None
-                em_slice_list = []
-
-                if has_em:
-                    em_img, _ = load_nifti(em_path)
-                    _, em_data = resample_mask_to_mri(em_img, mri_img)
-                    em_slices = get_relevant_slices(em_data)
-                    em_slice_list = em_slices["all"] if em_slices else []
-
-                common_slices = (
-                    sorted(set(ut_slice_list).intersection(set(em_slice_list)))
-                    if has_em else []
-                )
-
-                result = run_patient_classification(
-                    base_folder=base_folder,
-                    patient_id=patient_id,
-                    sequence=sequence,
-                    rater=rater,
-                    target_size=(128, 128),
-                    roi_crop_size=160,
-                    threshold=threshold,
-                    model_path="cnn_endometrioma_classifier.pth",
-                )
-
-            st.markdown(
-                "<div class='section-title'>Resultado del análisis</div>",
+            status_text.markdown(
+                "<div class='loading-box'>Inicializando análisis clínico...</div>",
                 unsafe_allow_html=True
             )
+            progress_bar.progress(10)
+            time.sleep(0.2)
+
+            mri_img, mri_data = load_nifti(mri_path)
+
+            status_text.markdown(
+                "<div class='loading-box'>Cargando secuencias MRI...</div>",
+                unsafe_allow_html=True
+            )
+            progress_bar.progress(25)
+            time.sleep(0.2)
+
+            ut_img, _ = load_nifti(ut_path)
+            _, ut_data = resample_mask_to_mri(ut_img, mri_img)
+
+            ut_slices = get_relevant_slices(ut_data)
+            ut_slice_list = ut_slices["all"] if ut_slices else []
+
+            status_text.markdown(
+                "<div class='loading-box'>Evaluando región anatómica relevante...</div>",
+                unsafe_allow_html=True
+            )
+            progress_bar.progress(45)
+            time.sleep(0.2)
+
+            em_data = None
+            em_slices = None
+            em_slice_list = []
+
+            if has_em:
+                em_img, _ = load_nifti(em_path)
+                _, em_data = resample_mask_to_mri(em_img, mri_img)
+                em_slices = get_relevant_slices(em_data)
+                em_slice_list = em_slices["all"] if em_slices else []
+
+            common_slices = (
+                sorted(set(ut_slice_list).intersection(set(em_slice_list)))
+                if has_em else []
+            )
+
+            status_text.markdown(
+                "<div class='loading-box'>Procesando hallazgos relevantes...</div>",
+                unsafe_allow_html=True
+            )
+            progress_bar.progress(70)
+            time.sleep(0.2)
+
+            result = run_patient_classification(
+                base_folder=base_folder,
+                patient_id=patient_id,
+                sequence=sequence,
+                rater=rater,
+                target_size=(128, 128),
+                roi_crop_size=160,
+                threshold=threshold,
+                model_path="cnn_endometrioma_classifier.pth",
+            )
+
+            status_text.markdown(
+                "<div class='loading-box'>Generando reporte clínico...</div>",
+                unsafe_allow_html=True
+            )
+            progress_bar.progress(95)
+            time.sleep(0.2)
+
+            progress_bar.progress(100)
+            status_text.success("Análisis completado")
+
+            html_block("<div class='section-title'>Resultado del análisis</div>")
 
             c1, c2, c3 = st.columns(3)
 
             with c1:
-                st.markdown(
-                    f"""
-<div class="card">
-    <div class="card-title">Probabilidad estimada</div>
-    <div class="card-value">{result['max_probability']:.2f}</div>
-</div>
-""",
-                    unsafe_allow_html=True
-                )
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">Probabilidad estimada</div>
+                    <div class="card-value">{result['max_probability']:.2f}</div>
+                </div>
+                """)
 
             with c2:
-                st.markdown(
-                    f"""
-<div class="card">
-    <div class="card-title">Cortes relevantes</div>
-    <div class="card-value">{result['positive_slices']}</div>
-</div>
-""",
-                    unsafe_allow_html=True
-                )
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">Cortes relevantes</div>
+                    <div class="card-value">{result['positive_slices']}</div>
+                </div>
+                """)
 
             with c3:
                 if not has_em:
@@ -338,66 +426,39 @@ if analyze_button:
                         else "Sin hallazgos relevantes"
                     )
 
-                st.markdown(
-                    f"""
-<div class="card">
-    <div class="card-title">Interpretación</div>
-    <div class="card-value">{pred_text}</div>
-</div>
-""",
-                    unsafe_allow_html=True
-                )
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">Interpretación</div>
+                    <div class="card-value">{pred_text}</div>
+                </div>
+                """)
 
             prob = result["max_probability"]
 
             if prob < 0.45:
-                st.markdown(
-                    "<div class='risk-low'>Baja probabilidad clínica</div>",
-                    unsafe_allow_html=True
-                )
+                html_block("<div class='risk-low'>Baja probabilidad clínica</div>")
             elif prob < 0.60:
-                st.markdown(
-                    "<div class='risk-mid'>Probabilidad intermedia — requiere revisión</div>",
-                    unsafe_allow_html=True
-                )
+                html_block("<div class='risk-mid'>Probabilidad intermedia — requiere revisión</div>")
             else:
-                st.markdown(
-                    "<div class='risk-high'>Alta probabilidad de hallazgo relevante</div>",
-                    unsafe_allow_html=True
-                )
+                html_block("<div class='risk-high'>Alta probabilidad de hallazgo relevante</div>")
 
             st.caption(
                 "Este análisis es una herramienta de apoyo y no sustituye la interpretación clínica profesional."
             )
 
-            st.markdown(
-                "<div class='section-title'>Visualización MRI</div>",
-                unsafe_allow_html=True
-            )
-            st.markdown(
-                "<div class='viz-helper'>Corte representativo del estudio enfocado en la región de interés clínica.</div>",
-                unsafe_allow_html=True
-            )
+            html_block("<div class='section-title'>Visualización MRI</div>")
+            html_block("<div class='viz-helper'>Corte representativo del estudio enfocado en la región de interés clínica.</div>")
 
             label_col1, label_col2, label_col3 = st.columns(3)
 
             with label_col1:
-                st.markdown(
-                    "<div class='viz-label'>Imagen MRI</div>",
-                    unsafe_allow_html=True
-                )
+                html_block("<div class='viz-label'>Imagen MRI</div>")
 
             with label_col2:
-                st.markdown(
-                    "<div class='viz-label'>Región anatómica relevante</div>",
-                    unsafe_allow_html=True
-                )
+                html_block("<div class='viz-label'>Región anatómica relevante</div>")
 
             with label_col3:
-                st.markdown(
-                    "<div class='viz-label'>Zona de análisis</div>",
-                    unsafe_allow_html=True
-                )
+                html_block("<div class='viz-label'>Zona de análisis</div>")
 
             if has_em and em_data is not None:
                 fig = build_triptych_figure(
@@ -431,15 +492,9 @@ if analyze_button:
                     st.pyplot(fig2, use_container_width=True)
 
                 with v3:
-                    st.markdown(
-                        "<div class='empty-panel'>No se identifican regiones con características compatibles con endometrioma</div>",
-                        unsafe_allow_html=True
-                    )
+                    html_block("<div class='empty-panel'>No se identifican regiones con características compatibles con endometrioma</div>")
 
-            st.markdown(
-                "<div class='section-title'>Cortes con mayor probabilidad</div>",
-                unsafe_allow_html=True
-            )
+            html_block("<div class='section-title'>Cortes con mayor probabilidad</div>")
 
             top_slices = sorted(
                 result["slice_results"],
@@ -460,15 +515,12 @@ if analyze_button:
                     ax.axis("off")
                     st.pyplot(fig, use_container_width=True)
 
-                    st.markdown(
-                        f"""
-<div class="card">
-    <div class="card-title">Corte {slice_idx}</div>
-    <div class="card-value">{prob_slice:.2f}</div>
-</div>
-""",
-                        unsafe_allow_html=True
-                    )
+                    html_block(f"""
+                    <div class="card">
+                        <div class="card-title">Corte {slice_idx}</div>
+                        <div class="card-value">{prob_slice:.2f}</div>
+                    </div>
+                    """)
 
             with st.expander("Ver detalle técnico"):
                 summary_data = {

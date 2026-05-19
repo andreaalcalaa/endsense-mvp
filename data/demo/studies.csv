@@ -1,4 +1,4 @@
-study_id,folder_id,upload_date,status,sequence
-CASE-001,D1-002,2026-05-18,Pendiente,T2
-CASE-002,D1-032,2026-05-18,Pendiente,T2
-CASE-003,D1-035,2026-05-18,Pendiente,T2
+study_id,folder_id,upload_date,status,sequence,priority
+CASE-001,D1-002,2026-05-18,Pendiente,T2,Alta
+CASE-002,D1-032,2026-05-18,Pendiente,T2,Media
+CASE-003,D1-035,2026-05-18,Pendiente,T2,Baja
