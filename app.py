@@ -316,7 +316,7 @@ analyze_button = st.button(
 )
 
 
-if analyze_button:
+if analyze_button or "analysis_ready" in st.session_state:
     try:
         base_folder = os.path.join(dataset_root, patient_id)
 
@@ -393,6 +393,23 @@ if analyze_button:
                 threshold=threshold,
                 model_path="cnn_endometrioma_classifier.pth",
             )
+            st.session_state["analysis_ready"] = True
+            st.session_state["mri_data"] = mri_data
+            st.session_state["ut_data"] = ut_data
+            st.session_state["em_data"] = em_data
+            st.session_state["result"] = result
+            st.session_state["ut_slices"] = ut_slices
+            st.session_state["em_slices"] = em_slices
+            st.session_state["common_slices"] = common_slices
+
+            if "analysis_ready" in st.session_state:
+                mri_data = st.session_state["mri_data"]
+                ut_data = st.session_state["ut_data"]
+                em_data = st.session_state["em_data"]
+                result = st.session_state["result"]
+                ut_slices = st.session_state["ut_slices"]
+                em_slices = st.session_state["em_slices"]
+                common_slices = st.session_state["common_slices"]
 
             status_text.markdown("<div class='loading-box'>Generando lectura asistida...</div>", unsafe_allow_html=True)
             progress_bar.progress(95)
@@ -594,6 +611,77 @@ if analyze_button:
                         </div>
                         """)
 
+            html_block("<div class='section-title'>Explorador de cortes</div>")
+            html_block("<div class='viz-helper'>Explora manualmente el estudio MRI y revisa cualquier corte axial.</div>")
+
+            total_slices = mri_data.shape[2]
+
+            default_slice = (
+                main_slice if top_slices else total_slices // 2
+            )
+
+            selected_slice = st.slider(
+                "Seleccionar corte axial",
+                min_value=0,
+                max_value=total_slices - 1,
+                value=default_slice,
+                step=1
+            )
+
+            explorer_mri = normalize_slice(
+                orient_slice(mri_data, selected_slice)
+            )
+
+            explorer_cols = st.columns(3)
+
+            with explorer_cols[0]:
+                html_block("<div class='viz-label'>MRI</div>")
+                st.image(
+                    explorer_mri,
+                    caption=f"Corte {selected_slice}",
+                    use_container_width=True,
+                    clamp=True
+                )
+
+            with explorer_cols[1]:
+                html_block("<div class='viz-label'>Área de referencia</div>")
+
+                explorer_ut = make_overlay(
+                    orient_slice(mri_data, selected_slice),
+                    orient_slice(ut_data, selected_slice),
+                    color=(34, 197, 94),
+                    alpha=0.45
+                )
+
+                st.image(
+                    explorer_ut,
+                    caption=f"Corte {selected_slice}",
+                    use_container_width=True,
+                    clamp=True
+                )
+
+            with explorer_cols[2]:
+                html_block("<div class='viz-label'>Hallazgo evaluado</div>")
+
+                if has_em and em_data is not None:
+                    explorer_em = make_overlay(
+                        orient_slice(mri_data, selected_slice),
+                        orient_slice(em_data, selected_slice),
+                        color=(239, 68, 68),
+                        alpha=0.55
+                    )
+
+                    st.image(
+                        explorer_em,
+                        caption=f"Corte {selected_slice}",
+                        use_container_width=True,
+                        clamp=True
+                    )
+
+                else:
+                    html_block(
+                        "<div class='empty-panel'>No se identifican hallazgos compatibles en este corte</div>"
+                    )
             with st.expander("Ver detalle técnico"):
                 summary_data = {
                     "study_id": study_id,
