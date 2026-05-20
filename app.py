@@ -1,14 +1,12 @@
 import os
 import time
 import numpy as np
-import matplotlib.pyplot as plt
 import streamlit as st
 import pandas as pd
 
 from src.loader import load_nifti
 from src.preprocessing import resample_mask_to_mri, get_relevant_slices
 from src.features import extract_features
-from src.visualization import build_triptych_figure
 from src.classifier_inference import run_patient_classification
 
 
@@ -24,11 +22,44 @@ def html_block(html: str):
     st.markdown(cleaned, unsafe_allow_html=True)
 
 
+def clinical_level(prob):
+    if prob < 0.45:
+        return "Baja sospecha clínica", "risk-low"
+    elif prob < 0.60:
+        return "Sospecha intermedia", "risk-mid"
+    else:
+        return "Alta sospecha clínica", "risk-high"
+
+
+def normalize_slice(slice_img):
+    img = slice_img.astype(np.float32)
+    img = np.nan_to_num(img)
+    img = img - np.min(img)
+    max_val = np.max(img)
+    if max_val > 0:
+        img = img / max_val
+    return (img * 255).astype(np.uint8)
+
+
+def orient_slice(volume, slice_idx):
+    return np.flipud(volume[:, :, slice_idx].T)
+
+
+def make_overlay(mri_slice, mask_slice, color=(255, 99, 71), alpha=0.50):
+    base = normalize_slice(mri_slice)
+    rgb = np.stack([base, base, base], axis=-1).astype(np.float32)
+
+    mask = mask_slice > 0
+    color_arr = np.array(color, dtype=np.float32)
+
+    rgb[mask] = (1 - alpha) * rgb[mask] + alpha * color_arr
+    return np.clip(rgb, 0, 255).astype(np.uint8)
+
+
 html_block("""
 <style>
 .main { background-color: #0b1020; }
 .block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 1400px; }
-h1, h2, h3 { color: #f4f7fb; }
 
 .card {
     background: linear-gradient(180deg, #131a2e 0%, #101729 100%);
@@ -101,8 +132,8 @@ h1, h2, h3 { color: #f4f7fb; }
     padding: 14px 18px;
     border-radius: 14px;
     border: 1px solid rgba(34,197,94,0.3);
-    font-weight: 700;
-    font-size: 1rem;
+    font-weight: 800;
+    font-size: 1.05rem;
 }
 
 .risk-mid {
@@ -111,8 +142,8 @@ h1, h2, h3 { color: #f4f7fb; }
     padding: 14px 18px;
     border-radius: 14px;
     border: 1px solid rgba(250,204,21,0.3);
-    font-weight: 700;
-    font-size: 1rem;
+    font-weight: 800;
+    font-size: 1.05rem;
 }
 
 .risk-high {
@@ -121,8 +152,8 @@ h1, h2, h3 { color: #f4f7fb; }
     padding: 14px 18px;
     border-radius: 14px;
     border: 1px solid rgba(239,68,68,0.3);
-    font-weight: 700;
-    font-size: 1rem;
+    font-weight: 800;
+    font-size: 1.05rem;
 }
 
 .viz-label {
@@ -172,16 +203,21 @@ div.stButton > button:first-child {
     font-size: 1.05rem;
     font-weight: 700;
 }
+
+@media (max-width: 768px) {
+    .hero { padding: 24px 22px; border-radius: 22px; }
+    .hero-title { font-size: 2.4rem; }
+    .hero-subtitle { font-size: 1rem; }
+    .card { padding: 18px 20px; border-radius: 18px; }
+    .card-value { font-size: 1.8rem; }
+    .section-title { font-size: 1.25rem; }
+}
 </style>
 """)
 
 
-# =========================
-# SIDEBAR
-# =========================
-
 with st.sidebar:
-    st.markdown("## Estudios pendientes")
+    st.markdown("## Worklist")
 
     dataset_root = "data/demo/D1_MHS"
     studies_path = "data/demo/studies.csv"
@@ -234,10 +270,6 @@ with st.sidebar:
     threshold = 0.55
 
 
-# =========================
-# HEADER
-# =========================
-
 html_block("""
 <div class="hero">
     <div class="hero-kicker">Clinical Review Dashboard</div>
@@ -248,10 +280,6 @@ html_block("""
 </div>
 """)
 
-
-# =========================
-# STUDY OVERVIEW
-# =========================
 
 overview_col1, overview_col2 = st.columns([1, 2])
 
@@ -288,10 +316,6 @@ analyze_button = st.button(
 )
 
 
-# =========================
-# ANALYSIS
-# =========================
-
 if analyze_button:
     try:
         base_folder = os.path.join(dataset_root, patient_id)
@@ -320,19 +344,13 @@ if analyze_button:
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            status_text.markdown(
-                "<div class='loading-box'>Inicializando análisis clínico...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Inicializando análisis clínico...</div>", unsafe_allow_html=True)
             progress_bar.progress(10)
             time.sleep(0.2)
 
             mri_img, mri_data = load_nifti(mri_path)
 
-            status_text.markdown(
-                "<div class='loading-box'>Cargando secuencias MRI...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Cargando secuencias MRI...</div>", unsafe_allow_html=True)
             progress_bar.progress(25)
             time.sleep(0.2)
 
@@ -342,10 +360,7 @@ if analyze_button:
             ut_slices = get_relevant_slices(ut_data)
             ut_slice_list = ut_slices["all"] if ut_slices else []
 
-            status_text.markdown(
-                "<div class='loading-box'>Evaluando región anatómica relevante...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Evaluando área de referencia...</div>", unsafe_allow_html=True)
             progress_bar.progress(45)
             time.sleep(0.2)
 
@@ -364,10 +379,7 @@ if analyze_button:
                 if has_em else []
             )
 
-            status_text.markdown(
-                "<div class='loading-box'>Procesando hallazgos relevantes...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Procesando hallazgos de interés...</div>", unsafe_allow_html=True)
             progress_bar.progress(70)
             time.sleep(0.2)
 
@@ -382,15 +394,15 @@ if analyze_button:
                 model_path="cnn_endometrioma_classifier.pth",
             )
 
-            status_text.markdown(
-                "<div class='loading-box'>Generando reporte clínico...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Generando lectura asistida...</div>", unsafe_allow_html=True)
             progress_bar.progress(95)
             time.sleep(0.2)
 
             progress_bar.progress(100)
             status_text.success("Análisis completado")
+
+            prob = result["max_probability"]
+            level_text, risk_class = clinical_level(prob)
 
             html_block("<div class='section-title'>Resultado del análisis</div>")
 
@@ -399,25 +411,25 @@ if analyze_button:
             with c1:
                 html_block(f"""
                 <div class="card">
-                    <div class="card-title">Probabilidad estimada</div>
-                    <div class="card-value">{result['max_probability']:.2f}</div>
+                    <div class="card-title">Sospecha clínica</div>
+                    <div class="card-value">{level_text}</div>
                 </div>
                 """)
 
             with c2:
                 html_block(f"""
                 <div class="card">
-                    <div class="card-title">Cortes relevantes</div>
-                    <div class="card-value">{result['positive_slices']}</div>
+                    <div class="card-title">Probabilidad del hallazgo</div>
+                    <div class="card-value">{prob * 100:.0f}%</div>
                 </div>
                 """)
 
             with c3:
                 if not has_em:
                     pred_text = (
-                        "Sospecha de lesión"
+                        "Revisión recomendada"
                         if result["patient_prediction"] == 1
-                        else "Sin evidencia de lesión"
+                        else "Sin hallazgos prioritarios"
                     )
                 else:
                     pred_text = (
@@ -428,19 +440,12 @@ if analyze_button:
 
                 html_block(f"""
                 <div class="card">
-                    <div class="card-title">Interpretación</div>
+                    <div class="card-title">Lectura asistida</div>
                     <div class="card-value">{pred_text}</div>
                 </div>
                 """)
 
-            prob = result["max_probability"]
-
-            if prob < 0.45:
-                html_block("<div class='risk-low'>Baja probabilidad clínica</div>")
-            elif prob < 0.60:
-                html_block("<div class='risk-mid'>Probabilidad intermedia — requiere revisión</div>")
-            else:
-                html_block("<div class='risk-high'>Alta probabilidad de hallazgo relevante</div>")
+            html_block(f"<div class='{risk_class}'>{level_text}</div>")
 
             st.caption(
                 "Este análisis es una herramienta de apoyo y no sustituye la interpretación clínica profesional."
@@ -449,52 +454,94 @@ if analyze_button:
             html_block("<div class='section-title'>Visualización MRI</div>")
             html_block("<div class='viz-helper'>Corte representativo del estudio enfocado en la región de interés clínica.</div>")
 
-            label_col1, label_col2, label_col3 = st.columns(3)
-
-            with label_col1:
-                html_block("<div class='viz-label'>Imagen MRI</div>")
-
-            with label_col2:
-                html_block("<div class='viz-label'>Región anatómica relevante</div>")
-
-            with label_col3:
-                html_block("<div class='viz-label'>Zona de análisis</div>")
-
             if has_em and em_data is not None:
-                fig = build_triptych_figure(
-                    mri_data, ut_data, em_data, ut_slices, em_slices
+                selected_slice = (
+                    common_slices[len(common_slices) // 2]
+                    if common_slices
+                    else em_slices["middle"]
                 )
-                st.pyplot(fig, use_container_width=True)
-            else:
-                preview_slice = (
-                    ut_slices["middle"] if ut_slices else (mri_data.shape[2] // 2)
+
+                mri_view = normalize_slice(orient_slice(mri_data, selected_slice))
+                ut_view = make_overlay(
+                    orient_slice(mri_data, selected_slice),
+                    orient_slice(ut_data, selected_slice),
+                    color=(34, 197, 94),
+                    alpha=0.45
+                )
+                em_view = make_overlay(
+                    orient_slice(mri_data, selected_slice),
+                    orient_slice(em_data, selected_slice),
+                    color=(239, 68, 68),
+                    alpha=0.55
                 )
 
                 v1, v2, v3 = st.columns(3)
 
                 with v1:
-                    fig1, ax1 = plt.subplots(figsize=(4, 4), facecolor="#0b1020")
-                    ax1.set_facecolor("#0b1020")
-                    ax1.imshow(mri_data[:, :, preview_slice].T, cmap="gray", origin="lower")
-                    ax1.axis("off")
-                    st.pyplot(fig1, use_container_width=True)
+                    html_block("<div class='viz-label'>Imagen MRI</div>")
+                    st.image(
+                        mri_view,
+                        caption=f"Corte {selected_slice}",
+                        use_container_width=True,
+                        clamp=True
+                    )
 
                 with v2:
-                    fig2, ax2 = plt.subplots(figsize=(4, 4), facecolor="#0b1020")
-                    ax2.set_facecolor("#0b1020")
-                    ax2.imshow(mri_data[:, :, preview_slice].T, cmap="gray", origin="lower")
-                    masked = np.ma.masked_where(
-                        ut_data[:, :, preview_slice].T == 0,
-                        ut_data[:, :, preview_slice].T
+                    html_block("<div class='viz-label'>Área de referencia</div>")
+                    st.image(
+                        ut_view,
+                        caption=f"Corte {selected_slice}",
+                        use_container_width=True,
+                        clamp=True
                     )
-                    ax2.imshow(masked, cmap="spring", alpha=0.55, origin="lower")
-                    ax2.axis("off")
-                    st.pyplot(fig2, use_container_width=True)
 
                 with v3:
+                    html_block("<div class='viz-label'>Hallazgo evaluado</div>")
+                    st.image(
+                        em_view,
+                        caption=f"Corte {selected_slice}",
+                        use_container_width=True,
+                        clamp=True
+                    )
+
+            else:
+                preview_slice = (
+                    ut_slices["middle"] if ut_slices else (mri_data.shape[2] // 2)
+                )
+
+                mri_view = normalize_slice(orient_slice(mri_data, preview_slice))
+                ut_view = make_overlay(
+                    orient_slice(mri_data, preview_slice),
+                    orient_slice(ut_data, preview_slice),
+                    color=(34, 197, 94),
+                    alpha=0.45
+                )
+
+                v1, v2, v3 = st.columns(3)
+
+                with v1:
+                    html_block("<div class='viz-label'>Imagen MRI</div>")
+                    st.image(
+                        mri_view,
+                        caption=f"Corte {preview_slice}",
+                        use_container_width=True,
+                        clamp=True
+                    )
+
+                with v2:
+                    html_block("<div class='viz-label'>Área de referencia</div>")
+                    st.image(
+                        ut_view,
+                        caption=f"Corte {preview_slice}",
+                        use_container_width=True,
+                        clamp=True
+                    )
+
+                with v3:
+                    html_block("<div class='viz-label'>Hallazgo evaluado</div>")
                     html_block("<div class='empty-panel'>No se identifican regiones con características compatibles con endometrioma</div>")
 
-            html_block("<div class='section-title'>Cortes con mayor probabilidad</div>")
+            html_block("<div class='section-title'>Cortes prioritarios para revisión</div>")
 
             top_slices = sorted(
                 result["slice_results"],
@@ -502,25 +549,50 @@ if analyze_button:
                 reverse=True
             )[:3]
 
-            top_cols = st.columns(3)
+            if top_slices:
+                main_slice = int(top_slices[0]["slice_idx"])
+                main_prob = top_slices[0]["probability"]
 
-            for i, slice_info in enumerate(top_slices):
-                slice_idx = int(slice_info["slice_idx"])
-                prob_slice = slice_info["probability"]
+                main_img = normalize_slice(orient_slice(mri_data, main_slice))
 
-                with top_cols[i]:
-                    fig, ax = plt.subplots(figsize=(4, 4), facecolor="#0b1020")
-                    ax.set_facecolor("#0b1020")
-                    ax.imshow(mri_data[:, :, slice_idx].T, cmap="gray", origin="lower")
-                    ax.axis("off")
-                    st.pyplot(fig, use_container_width=True)
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">Corte principal sugerido</div>
+                    <div class="card-value">Corte {main_slice} · {main_prob * 100:.0f}%</div>
+                </div>
+                """)
 
-                    html_block(f"""
-                    <div class="card">
-                        <div class="card-title">Corte {slice_idx}</div>
-                        <div class="card-value">{prob_slice:.2f}</div>
-                    </div>
-                    """)
+                st.image(
+                    main_img,
+                    caption=f"Corte prioritario {main_slice} · Probabilidad del hallazgo {main_prob * 100:.0f}%",
+                    use_container_width=True,
+                    clamp=True
+                )
+
+                html_block("<div class='section-title'>Otros cortes de interés</div>")
+
+                top_cols = st.columns(3)
+
+                for i, slice_info in enumerate(top_slices):
+                    slice_idx = int(slice_info["slice_idx"])
+                    prob_slice = slice_info["probability"]
+                    img = normalize_slice(orient_slice(mri_data, slice_idx))
+
+                    with top_cols[i]:
+                        html_block(f"<div class='viz-label'>Corte {slice_idx}</div>")
+                        st.image(
+                            img,
+                            caption=f"{prob_slice * 100:.0f}% probabilidad",
+                            use_container_width=True,
+                            clamp=True
+                        )
+
+                        html_block(f"""
+                        <div class="card">
+                            <div class="card-title">Probabilidad del hallazgo</div>
+                            <div class="card-value">{prob_slice * 100:.0f}%</div>
+                        </div>
+                        """)
 
             with st.expander("Ver detalle técnico"):
                 summary_data = {
