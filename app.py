@@ -60,14 +60,26 @@ html_block("""
 <style>
 .main { background-color: #0b1020; }
 .block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 1400px; }
-
 .card {
     background: linear-gradient(180deg, #131a2e 0%, #101729 100%);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 22px;
-    padding: 24px 28px;
+    padding: 22px 24px;
     margin-bottom: 18px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+
+    transition:
+        transform 0.18s ease,
+        box-shadow 0.18s ease,
+        border-color 0.18s ease;
+
+    backdrop-filter: blur(10px);
+}
+
+.card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(147,197,253,0.22);
+    box-shadow: 0 14px 32px rgba(0,0,0,0.32);
 }
 
 .hero {
@@ -198,10 +210,35 @@ html_block("""
 }
 
 div.stButton > button:first-child {
-    height: 3.2rem;
-    border-radius: 14px;
-    font-size: 1.05rem;
+    height: 3.3rem;
+    border-radius: 16px;
+    font-size: 1.02rem;
     font-weight: 700;
+
+    background: linear-gradient(
+        135deg,
+        #2563eb 0%,
+        #1d4ed8 100%
+    );
+
+    color: white;
+    border: none;
+
+    transition:
+        transform 0.15s ease,
+        box-shadow 0.15s ease,
+        opacity 0.15s ease;
+
+    box-shadow:
+        0 8px 22px rgba(37,99,235,0.35);
+}
+
+div.stButton > button:first-child:hover {
+    transform: translateY(-2px);
+    opacity: 0.96;
+
+    box-shadow:
+        0 12px 28px rgba(37,99,235,0.42);
 }
 
 @media (max-width: 768px) {
@@ -211,6 +248,12 @@ div.stButton > button:first-child {
     .card { padding: 18px 20px; border-radius: 18px; }
     .card-value { font-size: 1.8rem; }
     .section-title { font-size: 1.25rem; }
+}
+
+[data-testid="stImage"] img {
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.24);
 }
 </style>
 """)
