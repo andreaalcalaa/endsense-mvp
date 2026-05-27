@@ -1,4 +1,6 @@
 import os
+import zipfile
+import tempfile
 import time
 import numpy as np
 import streamlit as st
@@ -48,18 +50,42 @@ def orient_slice(volume, slice_idx):
 def make_overlay(mri_slice, mask_slice, color=(255, 99, 71), alpha=0.50):
     base = normalize_slice(mri_slice)
     rgb = np.stack([base, base, base], axis=-1).astype(np.float32)
-
     mask = mask_slice > 0
     color_arr = np.array(color, dtype=np.float32)
-
     rgb[mask] = (1 - alpha) * rgb[mask] + alpha * color_arr
     return np.clip(rgb, 0, 255).astype(np.uint8)
+
+
+def find_uploaded_study_folder(extract_dir, sequence):
+    nii_files = []
+
+    for root, dirs, files in os.walk(extract_dir):
+        for file in files:
+            if file.endswith(".nii.gz"):
+                nii_files.append((root, file))
+
+    if not nii_files:
+        return None, None, []
+
+    sequence_candidates = [
+        (root, file)
+        for root, file in nii_files
+        if file.endswith(f"_{sequence}.nii.gz")
+    ]
+
+    selected_root, selected_file = (
+        sequence_candidates[0] if sequence_candidates else nii_files[0]
+    )
+
+    patient_id = selected_file.split("_")[0]
+    return selected_root, patient_id, nii_files
 
 
 html_block("""
 <style>
 .main { background-color: #0b1020; }
 .block-container { padding-top: 2rem; padding-bottom: 2rem; max-width: 1400px; }
+
 .card {
     background: linear-gradient(180deg, #131a2e 0%, #101729 100%);
     border: 1px solid rgba(255,255,255,0.08);
@@ -67,12 +93,7 @@ html_block("""
     padding: 22px 24px;
     margin-bottom: 18px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.22);
-
-    transition:
-        transform 0.18s ease,
-        box-shadow 0.18s ease,
-        border-color 0.18s ease;
-
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
     backdrop-filter: blur(10px);
 }
 
@@ -214,31 +235,17 @@ div.stButton > button:first-child {
     border-radius: 16px;
     font-size: 1.02rem;
     font-weight: 700;
-
-    background: linear-gradient(
-        135deg,
-        #2563eb 0%,
-        #1d4ed8 100%
-    );
-
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
     color: white;
     border: none;
-
-    transition:
-        transform 0.15s ease,
-        box-shadow 0.15s ease,
-        opacity 0.15s ease;
-
-    box-shadow:
-        0 8px 22px rgba(37,99,235,0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    box-shadow: 0 8px 22px rgba(37,99,235,0.35);
 }
 
 div.stButton > button:first-child:hover {
     transform: translateY(-2px);
     opacity: 0.96;
-
-    box-shadow:
-        0 12px 28px rgba(37,99,235,0.42);
+    box-shadow: 0 12px 28px rgba(37,99,235,0.42);
 }
 
 @media (max-width: 768px) {
@@ -266,59 +273,126 @@ div.stButton > button:first-child:hover {
 with st.sidebar:
     st.markdown("## Worklist")
 
-    dataset_root = "data/demo/D1_MHS"
-    studies_path = "data/demo/studies.csv"
-
-    if not os.path.exists(studies_path):
-        st.warning("No se encontró el listado de estudios.")
-        st.stop()
-
-    studies_df = pd.read_csv(studies_path)
-    study_options = studies_df["study_id"].tolist()
-
-    def format_study_label(study_id):
-        row = studies_df[studies_df["study_id"] == study_id].iloc[0]
-        priority = row["priority"]
-        status = row["status"]
-
-        if priority == "Alta":
-            icon = "🔴"
-        elif priority == "Media":
-            icon = "🟡"
-        else:
-            icon = "🟢"
-
-        return f"{icon} {study_id} · {status}"
-
-    selected_study_id = st.selectbox(
-        "Lista de revisión",
-        study_options,
-        format_func=format_study_label,
-        key="study_selectbox"
-    )
-
-    selected_study = studies_df[
-        studies_df["study_id"] == selected_study_id
-    ].iloc[0]
-
-    patient_id = selected_study["folder_id"]
-    study_id = selected_study["study_id"]
-    upload_date = selected_study["upload_date"]
-    study_status = selected_study["status"]
-    study_priority = selected_study["priority"]
-
-    sequence = st.selectbox(
-        "Secuencia MRI",
-        ["T2", "T1FS"],
-        key="sequence_selectbox"
+    input_mode = st.radio(
+        "Modo de entrada",
+        ["Demo", "Upload ZIP"],
+        horizontal=False,
+        key="input_mode_radio"
     )
 
     rater = "r3"
     threshold = 0.55
+    can_analyze = True
+
+    selected_base_folder = None
+    patient_id = None
+    study_id = None
+    upload_date = None
+    study_status = None
+    study_priority = None
+    sequence = None
+    studies_count = 0
+
+    if input_mode == "Demo":
+        dataset_root = "data/demo/D1_MHS"
+        studies_path = "data/demo/studies.csv"
+
+        if not os.path.exists(studies_path):
+            st.warning("No se encontró el listado de estudios.")
+            st.stop()
+
+        studies_df = pd.read_csv(studies_path)
+        studies_count = len(studies_df)
+        study_options = studies_df["study_id"].tolist()
+
+        def format_study_label(study_id_value):
+            row = studies_df[studies_df["study_id"] == study_id_value].iloc[0]
+            priority = row["priority"]
+            status = row["status"]
+
+            if priority == "Alta":
+                icon = "🔴"
+            elif priority == "Media":
+                icon = "🟡"
+            else:
+                icon = "🟢"
+
+            return f"{icon} {study_id_value} · {status}"
+
+        selected_study_id = st.selectbox(
+            "Lista de revisión",
+            study_options,
+            format_func=format_study_label,
+            key="study_selectbox"
+        )
+
+        selected_study = studies_df[
+            studies_df["study_id"] == selected_study_id
+        ].iloc[0]
+
+        patient_id = selected_study["folder_id"]
+        study_id = selected_study["study_id"]
+        upload_date = selected_study["upload_date"]
+        study_status = selected_study["status"]
+        study_priority = selected_study["priority"]
+
+        sequence = st.selectbox(
+            "Secuencia MRI",
+            ["T2", "T1FS"],
+            key="sequence_selectbox"
+        )
+
+        selected_base_folder = os.path.join(dataset_root, patient_id)
+
+    else:
+        uploaded_zip = st.file_uploader(
+            "Subir estudio (.zip)",
+            type=["zip"],
+            key="uploaded_study_zip"
+        )
+
+        study_id = "Uploaded Study"
+        upload_date = "Ahora"
+        study_status = "Nuevo"
+        study_priority = "Pendiente"
+        studies_count = 1
+
+        sequence = st.selectbox(
+            "Secuencia MRI",
+            ["T2", "T1FS"],
+            key="upload_sequence_selectbox"
+        )
+
+        if uploaded_zip is None:
+            can_analyze = False
+            st.info("Sube un archivo ZIP para habilitar el análisis.")
+        else:
+            temp_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(temp_dir, uploaded_zip.name)
+
+            with open(zip_path, "wb") as f:
+                f.write(uploaded_zip.read())
+
+            extract_dir = os.path.join(temp_dir, "study")
+
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            selected_base_folder, patient_id, nii_files = find_uploaded_study_folder(
+                extract_dir,
+                sequence
+            )
+
+            if patient_id is None or selected_base_folder is None:
+                can_analyze = False
+                st.error("No se encontraron archivos .nii.gz dentro del ZIP.")
+            else:
+                study_id = f"UPLOAD-{patient_id}"
+                st.success(f"Estudio detectado: {patient_id}")
 
 
-# Reset analysis if study or sequence changes
-current_case_key = f"{patient_id}_{sequence}"
+# Reset analysis if study, mode, sequence or folder changes
+current_case_key = f"{input_mode}_{patient_id}_{sequence}_{selected_base_folder}"
 
 if st.session_state.get("selected_case_key") != current_case_key:
     keys_to_clear = [
@@ -368,8 +442,8 @@ overview_col1, overview_col2 = st.columns([1, 2])
 with overview_col1:
     html_block(f"""
     <div class="card">
-        <div class="card-title">Estudios pendientes</div>
-        <div class="card-value">{len(studies_df)}</div>
+        <div class="card-title">Estudios disponibles</div>
+        <div class="card-value">{studies_count}</div>
     </div>
     """)
 
@@ -379,14 +453,14 @@ with overview_col2:
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
             <div>
                 <div class="card-title">ESTUDIO ACTIVO</div>
-                <div class="card-value">{study_id}</div>
+                <div class="card-value">{study_id if study_id else "Sin estudio"}</div>
             </div>
             <div style="background:#1e293b; padding:12px 18px; border-radius:14px; color:#cbd5e1; font-weight:700; font-size:0.95rem;">
-                {study_status} · Prioridad {study_priority}
+                {study_status if study_status else "Pendiente"} · Prioridad {study_priority if study_priority else "N/A"}
             </div>
         </div>
         <div style="color:#94a3b8; font-size:1rem; margin-top:8px;">
-            MRI pélvico · Secuencia {sequence} · Cargado {upload_date}
+            MRI pélvico · Secuencia {sequence if sequence else "N/A"} · Cargado {upload_date if upload_date else "N/A"}
         </div>
     </div>
     """)
@@ -402,9 +476,13 @@ analyze_button = st.button(
 # RUN ANALYSIS
 # =========================
 
-if analyze_button:
+if analyze_button and can_analyze:
     try:
-        base_folder = os.path.join(dataset_root, patient_id)
+        base_folder = selected_base_folder
+
+        if base_folder is None or patient_id is None:
+            st.error("No hay un estudio válido para analizar.")
+            st.stop()
 
         mri_path = os.path.join(base_folder, f"{patient_id}_{sequence}.nii.gz")
         ut_path = os.path.join(base_folder, f"{patient_id}_ut_{rater}.nii.gz")
@@ -430,13 +508,19 @@ if analyze_button:
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            status_text.markdown("<div class='loading-box'>Inicializando análisis clínico...</div>", unsafe_allow_html=True)
+            status_text.markdown(
+                "<div class='loading-box'>Inicializando análisis clínico...</div>",
+                unsafe_allow_html=True
+            )
             progress_bar.progress(10)
             time.sleep(0.2)
 
             mri_img, mri_data = load_nifti(mri_path)
 
-            status_text.markdown("<div class='loading-box'>Cargando secuencias MRI...</div>", unsafe_allow_html=True)
+            status_text.markdown(
+                "<div class='loading-box'>Cargando secuencias MRI...</div>",
+                unsafe_allow_html=True
+            )
             progress_bar.progress(25)
             time.sleep(0.2)
 
@@ -446,7 +530,10 @@ if analyze_button:
             ut_slices = get_relevant_slices(ut_data)
             ut_slice_list = ut_slices["all"] if ut_slices else []
 
-            status_text.markdown("<div class='loading-box'>Evaluando área de referencia...</div>", unsafe_allow_html=True)
+            status_text.markdown(
+                "<div class='loading-box'>Evaluando área de referencia...</div>",
+                unsafe_allow_html=True
+            )
             progress_bar.progress(45)
             time.sleep(0.2)
 
@@ -465,7 +552,10 @@ if analyze_button:
                 if has_em else []
             )
 
-            status_text.markdown("<div class='loading-box'>Procesando hallazgos de interés...</div>", unsafe_allow_html=True)
+            status_text.markdown(
+                "<div class='loading-box'>Procesando hallazgos de interés...</div>",
+                unsafe_allow_html=True
+            )
             progress_bar.progress(70)
             time.sleep(0.2)
 
@@ -480,7 +570,10 @@ if analyze_button:
                 model_path="cnn_endometrioma_classifier.pth",
             )
 
-            status_text.markdown("<div class='loading-box'>Generando lectura asistida...</div>", unsafe_allow_html=True)
+            status_text.markdown(
+                "<div class='loading-box'>Generando lectura asistida...</div>",
+                unsafe_allow_html=True
+            )
             progress_bar.progress(95)
             time.sleep(0.2)
 
@@ -500,6 +593,8 @@ if analyze_button:
             st.session_state["has_em"] = has_em
             st.session_state["has_ut"] = has_ut
             st.session_state["has_mri"] = has_mri
+            st.session_state["analysis_patient_id"] = patient_id
+            st.session_state["analysis_base_folder"] = base_folder
 
     except Exception as e:
         st.error(f"Error en análisis: {e}")
