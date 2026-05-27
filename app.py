@@ -1,6 +1,7 @@
 import os
 import zipfile
 import tempfile
+import shutil
 import time
 import numpy as np
 import streamlit as st
@@ -79,6 +80,37 @@ def find_uploaded_study_folder(extract_dir, sequence):
 
     patient_id = selected_file.split("_")[0]
     return selected_root, patient_id, nii_files
+def find_flexible_file(base_folder, patient_id, keywords, sequence=None):
+    matches = []
+
+    for root, dirs, files in os.walk(base_folder):
+        for file in files:
+            if not file.lower().endswith(".nii.gz"):
+                continue
+
+            lower = file.lower()
+
+            if patient_id.lower() not in lower:
+                continue
+
+            if sequence is not None and sequence.lower() not in lower:
+                continue
+
+            for keyword in keywords:
+                if keyword.lower() in lower:
+                    matches.append(os.path.join(root, file))
+
+    return matches[0] if matches else None
+
+
+def ensure_expected_file(found_path, expected_path):
+    if found_path is None:
+        return None
+
+    if os.path.abspath(found_path) != os.path.abspath(expected_path):
+        shutil.copyfile(found_path, expected_path)
+
+    return expected_path
 
 
 html_block("""
@@ -484,13 +516,36 @@ if analyze_button and can_analyze:
             st.error("No hay un estudio válido para analizar.")
             st.stop()
 
-        mri_path = os.path.join(base_folder, f"{patient_id}_{sequence}.nii.gz")
-        ut_path = os.path.join(base_folder, f"{patient_id}_ut_{rater}.nii.gz")
-        em_path = os.path.join(base_folder, f"{patient_id}_em_{rater}.nii.gz")
+        expected_mri_path = os.path.join(base_folder, f"{patient_id}_{sequence}.nii.gz")
+        expected_ut_path = os.path.join(base_folder, f"{patient_id}_ut_{rater}.nii.gz")
+        expected_em_path = os.path.join(base_folder, f"{patient_id}_em_{rater}.nii.gz")
 
-        has_mri = os.path.exists(mri_path)
-        has_ut = os.path.exists(ut_path)
-        has_em = os.path.exists(em_path)
+        mri_found_path = find_flexible_file(
+            base_folder,
+            patient_id,
+            [f"_{sequence.lower()}", sequence.lower()],
+            sequence=sequence
+        )
+
+        ut_found_path = find_flexible_file(
+            base_folder,
+            patient_id,
+            ["_ut_", "uterus", "ut"]
+        )
+
+        em_found_path = find_flexible_file(
+            base_folder,
+            patient_id,
+            ["_em_", "endometrioma", "em"]
+        )
+
+        mri_path = ensure_expected_file(mri_found_path, expected_mri_path)
+        ut_path = ensure_expected_file(ut_found_path, expected_ut_path)
+        em_path = ensure_expected_file(em_found_path, expected_em_path)
+
+        has_mri = mri_path is not None and os.path.exists(mri_path)
+        has_ut = ut_path is not None and os.path.exists(ut_path)
+        has_em = em_path is not None and os.path.exists(em_path)
 
         missing_required = []
 
