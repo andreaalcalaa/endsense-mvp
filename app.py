@@ -80,6 +80,8 @@ def find_uploaded_study_folder(extract_dir, sequence):
 
     patient_id = selected_file.split("_")[0]
     return selected_root, patient_id, nii_files
+
+
 def find_flexible_file(base_folder, patient_id, keywords, sequence=None):
     matches = []
 
@@ -280,6 +282,12 @@ div.stButton > button:first-child:hover {
     box-shadow: 0 12px 28px rgba(37,99,235,0.42);
 }
 
+[data-testid="stImage"] img {
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.24);
+}
+
 @media (max-width: 768px) {
     .hero { padding: 24px 22px; border-radius: 22px; }
     .hero-title { font-size: 2.4rem; }
@@ -287,12 +295,6 @@ div.stButton > button:first-child:hover {
     .card { padding: 18px 20px; border-radius: 18px; }
     .card-value { font-size: 1.8rem; }
     .section-title { font-size: 1.25rem; }
-}
-
-[data-testid="stImage"] img {
-    border-radius: 18px;
-    border: 1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 10px 24px rgba(0,0,0,0.24);
 }
 </style>
 """)
@@ -399,16 +401,26 @@ with st.sidebar:
             can_analyze = False
             st.info("Sube un archivo ZIP para habilitar el análisis.")
         else:
-            temp_dir = tempfile.mkdtemp()
-            zip_path = os.path.join(temp_dir, uploaded_zip.name)
+            upload_key = f"{uploaded_zip.name}_{uploaded_zip.size}"
 
-            with open(zip_path, "wb") as f:
-                f.write(uploaded_zip.read())
+            if st.session_state.get("uploaded_zip_key") != upload_key:
+                temp_dir = tempfile.mkdtemp()
+                zip_path = os.path.join(temp_dir, uploaded_zip.name)
 
-            extract_dir = os.path.join(temp_dir, "study")
+                uploaded_zip.seek(0)
 
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(extract_dir)
+                with open(zip_path, "wb") as f:
+                    f.write(uploaded_zip.read())
+
+                extract_dir = os.path.join(temp_dir, "study")
+
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    zip_ref.extractall(extract_dir)
+
+                st.session_state["uploaded_zip_key"] = upload_key
+                st.session_state["uploaded_extract_dir"] = extract_dir
+            else:
+                extract_dir = st.session_state["uploaded_extract_dir"]
 
             selected_base_folder, patient_id, nii_files = find_uploaded_study_folder(
                 extract_dir,
@@ -423,7 +435,10 @@ with st.sidebar:
                 st.success(f"Estudio detectado: {patient_id}")
 
 
-# Reset analysis if study, mode, sequence or folder changes
+# =========================
+# RESET STATE
+# =========================
+
 current_case_key = f"{input_mode}_{patient_id}_{sequence}_{selected_base_folder}"
 
 if st.session_state.get("selected_case_key") != current_case_key:
@@ -563,19 +578,13 @@ if analyze_button and can_analyze:
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            status_text.markdown(
-                "<div class='loading-box'>Inicializando análisis clínico...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Inicializando análisis clínico...</div>", unsafe_allow_html=True)
             progress_bar.progress(10)
             time.sleep(0.2)
 
             mri_img, mri_data = load_nifti(mri_path)
 
-            status_text.markdown(
-                "<div class='loading-box'>Cargando secuencias MRI...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Cargando secuencias MRI...</div>", unsafe_allow_html=True)
             progress_bar.progress(25)
             time.sleep(0.2)
 
@@ -585,10 +594,7 @@ if analyze_button and can_analyze:
             ut_slices = get_relevant_slices(ut_data)
             ut_slice_list = ut_slices["all"] if ut_slices else []
 
-            status_text.markdown(
-                "<div class='loading-box'>Evaluando área de referencia...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Evaluando área de referencia...</div>", unsafe_allow_html=True)
             progress_bar.progress(45)
             time.sleep(0.2)
 
@@ -607,10 +613,7 @@ if analyze_button and can_analyze:
                 if has_em else []
             )
 
-            status_text.markdown(
-                "<div class='loading-box'>Procesando hallazgos de interés...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Procesando hallazgos de interés...</div>", unsafe_allow_html=True)
             progress_bar.progress(70)
             time.sleep(0.2)
 
@@ -622,13 +625,10 @@ if analyze_button and can_analyze:
                 target_size=(128, 128),
                 roi_crop_size=160,
                 threshold=threshold,
-                model_path="cnn_endometrioma_classifier.pth",
+                model_path="cnn_endometrioma_classifier_best.pth",
             )
 
-            status_text.markdown(
-                "<div class='loading-box'>Generando lectura asistida...</div>",
-                unsafe_allow_html=True
-            )
+            status_text.markdown("<div class='loading-box'>Generando lectura asistida...</div>", unsafe_allow_html=True)
             progress_bar.progress(95)
             time.sleep(0.2)
 
@@ -648,8 +648,6 @@ if analyze_button and can_analyze:
             st.session_state["has_em"] = has_em
             st.session_state["has_ut"] = has_ut
             st.session_state["has_mri"] = has_mri
-            st.session_state["analysis_patient_id"] = patient_id
-            st.session_state["analysis_base_folder"] = base_folder
 
     except Exception as e:
         st.error(f"Error en análisis: {e}")
@@ -674,257 +672,208 @@ if st.session_state.get("analysis_ready"):
     prob = result["max_probability"]
     level_text, risk_class = clinical_level(prob)
 
-    html_block("<div class='section-title'>Resultado del análisis</div>")
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        html_block(f"""
-        <div class="card">
-            <div class="card-title">Sospecha clínica</div>
-            <div class="card-value">{level_text}</div>
-        </div>
-        """)
-
-    with c2:
-        html_block(f"""
-        <div class="card">
-            <div class="card-title">Probabilidad del hallazgo</div>
-            <div class="card-value">{prob * 100:.0f}%</div>
-        </div>
-        """)
-
-    with c3:
-        if not has_em:
-            pred_text = (
-                "Revisión recomendada"
-                if result["patient_prediction"] == 1
-                else "Sin hallazgos prioritarios"
-            )
-        else:
-            pred_text = (
-                "Hallazgos compatibles"
-                if result["patient_prediction"] == 1
-                else "Sin hallazgos relevantes"
-            )
-
-        html_block(f"""
-        <div class="card">
-            <div class="card-title">Lectura asistida</div>
-            <div class="card-value">{pred_text}</div>
-        </div>
-        """)
-
-    html_block(f"<div class='{risk_class}'>{level_text}</div>")
-
-    st.caption(
-        "Este análisis es una herramienta de apoyo y no sustituye la interpretación clínica profesional."
+    active_section = st.segmented_control(
+    "Sección",
+    [
+        "Overview",
+        "MRI Viewer",
+        "Clinical Analysis",
+        "Technical"
+    ],
+    default="Overview",
+    key="active_section"
     )
 
-    html_block("<div class='section-title'>Visualización MRI</div>")
-    html_block("<div class='viz-helper'>Corte representativo del estudio enfocado en la región de interés clínica.</div>")
+    if active_section == "Overview":
+        html_block("<div class='section-title'>Resultado del análisis</div>")
 
-    if has_em and em_data is not None:
-        selected_slice = (
-            common_slices[len(common_slices) // 2]
-            if common_slices
-            else em_slices["middle"]
-        )
+        c1, c2, c3 = st.columns(3)
 
-        mri_view = normalize_slice(orient_slice(mri_data, selected_slice))
-        ut_view = make_overlay(
-            orient_slice(mri_data, selected_slice),
-            orient_slice(ut_data, selected_slice),
-            color=(34, 197, 94),
-            alpha=0.45
-        )
-        em_view = make_overlay(
-            orient_slice(mri_data, selected_slice),
-            orient_slice(em_data, selected_slice),
-            color=(239, 68, 68),
-            alpha=0.55
-        )
+        with c1:
+            html_block(f"""
+            <div class="card">
+                <div class="card-title">Sospecha clínica</div>
+                <div class="card-value">{level_text}</div>
+            </div>
+            """)
 
-        v1, v2, v3 = st.columns(3)
+        with c2:
+            html_block(f"""
+            <div class="card">
+                <div class="card-title">Probabilidad del hallazgo</div>
+                <div class="card-value">{prob * 100:.0f}%</div>
+            </div>
+            """)
 
-        with v1:
-            html_block("<div class='viz-label'>Imagen MRI</div>")
-            st.image(
-                mri_view,
-                caption=f"Corte {selected_slice}",
-                use_container_width=True,
-                clamp=True
-            )
-
-        with v2:
-            html_block("<div class='viz-label'>Área de referencia</div>")
-            st.image(
-                ut_view,
-                caption=f"Corte {selected_slice}",
-                use_container_width=True,
-                clamp=True
-            )
-
-        with v3:
-            html_block("<div class='viz-label'>Hallazgo evaluado</div>")
-            st.image(
-                em_view,
-                caption=f"Corte {selected_slice}",
-                use_container_width=True,
-                clamp=True
-            )
-
-    else:
-        preview_slice = (
-            ut_slices["middle"] if ut_slices else (mri_data.shape[2] // 2)
-        )
-
-        mri_view = normalize_slice(orient_slice(mri_data, preview_slice))
-        ut_view = make_overlay(
-            orient_slice(mri_data, preview_slice),
-            orient_slice(ut_data, preview_slice),
-            color=(34, 197, 94),
-            alpha=0.45
-        )
-
-        v1, v2, v3 = st.columns(3)
-
-        with v1:
-            html_block("<div class='viz-label'>Imagen MRI</div>")
-            st.image(
-                mri_view,
-                caption=f"Corte {preview_slice}",
-                use_container_width=True,
-                clamp=True
-            )
-
-        with v2:
-            html_block("<div class='viz-label'>Área de referencia</div>")
-            st.image(
-                ut_view,
-                caption=f"Corte {preview_slice}",
-                use_container_width=True,
-                clamp=True
-            )
-
-        with v3:
-            html_block("<div class='viz-label'>Hallazgo evaluado</div>")
-            html_block("<div class='empty-panel'>No se identifican regiones con características compatibles con endometrioma</div>")
-
-    html_block("<div class='section-title'>Cortes prioritarios para revisión</div>")
-
-    top_slices = sorted(
-        result["slice_results"],
-        key=lambda x: x["probability"],
-        reverse=True
-    )[:3]
-
-    if top_slices:
-        main_slice = int(top_slices[0]["slice_idx"])
-        main_prob = top_slices[0]["probability"]
-
-        main_img = normalize_slice(orient_slice(mri_data, main_slice))
-
-        html_block(f"""
-        <div class="card">
-            <div class="card-title">Corte principal sugerido</div>
-            <div class="card-value">Corte {main_slice} · {main_prob * 100:.0f}%</div>
-        </div>
-        """)
-
-        st.image(
-            main_img,
-            caption=f"Corte prioritario {main_slice} · Probabilidad del hallazgo {main_prob * 100:.0f}%",
-            use_container_width=True,
-            clamp=True
-        )
-
-        html_block("<div class='section-title'>Otros cortes de interés</div>")
-
-        top_cols = st.columns(3)
-
-        for i, slice_info in enumerate(top_slices):
-            slice_idx = int(slice_info["slice_idx"])
-            prob_slice = slice_info["probability"]
-            img = normalize_slice(orient_slice(mri_data, slice_idx))
-
-            with top_cols[i]:
-                html_block(f"<div class='viz-label'>Corte {slice_idx}</div>")
-                st.image(
-                    img,
-                    caption=f"{prob_slice * 100:.0f}% probabilidad",
-                    use_container_width=True,
-                    clamp=True
+        with c3:
+            if not has_em:
+                pred_text = (
+                    "Revisión recomendada"
+                    if result["patient_prediction"] == 1
+                    else "Sin hallazgos prioritarios"
+                )
+            else:
+                pred_text = (
+                    "Hallazgos compatibles"
+                    if result["patient_prediction"] == 1
+                    else "Sin hallazgos relevantes"
                 )
 
-                html_block(f"""
-                <div class="card">
-                    <div class="card-title">Probabilidad del hallazgo</div>
-                    <div class="card-value">{prob_slice * 100:.0f}%</div>
-                </div>
-                """)
+            html_block(f"""
+            <div class="card">
+                <div class="card-title">Lectura asistida</div>
+                <div class="card-value">{pred_text}</div>
+            </div>
+            """)
 
-    html_block("<div class='section-title'>Explorador de cortes</div>")
-    html_block("<div class='viz-helper'>Explora manualmente el estudio MRI y revisa cualquier corte axial.</div>")
+        html_block(f"<div class='{risk_class}'>{level_text}</div>")
 
-    total_slices = mri_data.shape[2]
-
-    default_slice = (
-        int(top_slices[0]["slice_idx"])
-        if top_slices
-        else total_slices // 2
-    )
-
-    selected_slice = st.slider(
-        "Seleccionar corte axial",
-        min_value=0,
-        max_value=total_slices - 1,
-        value=default_slice,
-        step=1,
-        key="slice_explorer_slider"
-    )
-
-    view_mode = st.radio(
-        "Vista",
-        ["MRI limpio", "Área de referencia", "Hallazgo evaluado"],
-        horizontal=True,
-        key="slice_view_mode"
-    )
-
-    if view_mode == "MRI limpio":
-        explorer_img = normalize_slice(
-            orient_slice(mri_data, selected_slice)
+        st.caption(
+            "Este análisis es una herramienta de apoyo y no sustituye la interpretación clínica profesional."
         )
 
-    elif view_mode == "Área de referencia":
-        explorer_img = make_overlay(
-            orient_slice(mri_data, selected_slice),
-            orient_slice(ut_data, selected_slice),
-            color=(34, 197, 94),
-            alpha=0.45
+    elif active_section == "MRI Viewer":
+        html_block("<div class='section-title'>MRI Viewer</div>")
+        html_block("<div class='viz-helper'>Explora manualmente el estudio MRI y revisa cualquier corte axial.</div>")
+
+        total_slices = mri_data.shape[2]
+
+        top_slices = sorted(
+            result["slice_results"],
+            key=lambda x: x["probability"],
+            reverse=True
+        )[:3]
+
+        default_slice = (
+            int(top_slices[0]["slice_idx"])
+            if top_slices
+            else total_slices // 2
         )
 
-    else:
+        if "current_slice" not in st.session_state:
+            st.session_state["current_slice"] = default_slice
+
+        if st.session_state["current_slice"] > total_slices - 1:
+            st.session_state["current_slice"] = total_slices - 1
+
+
+        def decrease_slice():
+            st.session_state["current_slice"] = max(
+                0,
+                st.session_state["current_slice"] - 1
+            )
+
+
+        def increase_slice():
+            st.session_state["current_slice"] = min(
+                total_slices - 1,
+                st.session_state["current_slice"] + 1
+            )
+
+
+        slice_col1, slice_col2, slice_col3 = st.columns([1, 6, 1])
+
+        with slice_col1:
+            st.button(
+                "➖",
+                use_container_width=True,
+                on_click=decrease_slice
+            )
+
+        with slice_col2:
+            selected_slice = st.slider(
+                "Seleccionar corte axial",
+                min_value=0,
+                max_value=total_slices - 1,
+                step=1,
+                key="current_slice"
+            )
+
+        with slice_col3:
+            st.button(
+                "➕",
+                use_container_width=True,
+                on_click=increase_slice
+            )
+
+
+        view_options = ["MRI limpio", "Área de referencia"]
+
         if has_em and em_data is not None:
+            view_options.append("Hallazgo evaluado")
+
+        view_mode = st.radio(
+            "Vista",
+            view_options,
+            horizontal=True,
+            key="slice_view_mode"
+        )
+
+        html_block(f"<div class='viz-label'>Slice {selected_slice} / {total_slices - 1}</div>")
+
+        if view_mode == "MRI limpio":
+            explorer_img = normalize_slice(
+                orient_slice(mri_data, selected_slice)
+            )
+        elif view_mode == "Área de referencia":
+            explorer_img = make_overlay(
+                orient_slice(mri_data, selected_slice),
+                orient_slice(ut_data, selected_slice),
+                color=(34, 197, 94),
+                alpha=0.45
+            )
+        else:
             explorer_img = make_overlay(
                 orient_slice(mri_data, selected_slice),
                 orient_slice(em_data, selected_slice),
                 color=(239, 68, 68),
                 alpha=0.55
             )
-        else:
-            explorer_img = normalize_slice(
-                orient_slice(mri_data, selected_slice)
-            )
 
-    st.image(
-        explorer_img,
-        caption=f"{view_mode} · Corte {selected_slice}",
-        use_container_width=True,
-        clamp=True
-    )
+        st.image(
+            explorer_img,
+            caption=f"{view_mode} · Corte {selected_slice}",
+            use_container_width=True,
+            clamp=True
+        )
 
-    with st.expander("Ver detalle técnico"):
+    elif active_section == "Clinical Analysis":
+        html_block("<div class='section-title'>Cortes prioritarios para revisión</div>")
+        html_block("<div class='viz-helper'>Cortes con mayor probabilidad sugeridos para revisión clínica.</div>")
+
+        top_slices = sorted(
+            result["slice_results"],
+            key=lambda x: x["probability"],
+            reverse=True
+        )[:3]
+
+        if top_slices:
+            top_cols = st.columns(3)
+
+            for i, slice_info in enumerate(top_slices):
+                slice_idx = int(slice_info["slice_idx"])
+                prob_slice = slice_info["probability"]
+                img = normalize_slice(orient_slice(mri_data, slice_idx))
+
+                with top_cols[i]:
+                    html_block(f"<div class='viz-label'>Corte {slice_idx}</div>")
+                    st.image(
+                        img,
+                        caption=f"{prob_slice * 100:.0f}% probabilidad",
+                        use_container_width=True,
+                        clamp=True
+                    )
+
+                    html_block(f"""
+                    <div class="card">
+                        <div class="card-title">Probabilidad del hallazgo</div>
+                        <div class="card-value">{prob_slice * 100:.0f}%</div>
+                    </div>
+                    """)
+
+    elif active_section == "Technical":
+        html_block("<div class='section-title'>Detalle técnico</div>")
+
         summary_data = {
             "study_id": study_id,
             "internal_folder_id": patient_id,
@@ -971,3 +920,67 @@ if st.session_state.get("analysis_ready"):
 
         st.markdown("### Detalle por corte")
         st.dataframe(results_df, use_container_width=True)
+
+        html_block("<div class='section-title'>Desempeño del modelo</div>")
+
+        metrics_path = os.path.join("outputs", f"evaluation_metrics_{sequence}.csv")
+        cm_path = os.path.join("outputs", f"confusion_matrix_{sequence}.png")
+        roc_path = os.path.join("outputs", f"roc_curve_{sequence}.png")
+
+        if os.path.exists(metrics_path):
+            metrics_df = pd.read_csv(metrics_path)
+            metrics_row = metrics_df.iloc[0]
+
+            m1, m2, m3, m4 = st.columns(4)
+
+            with m1:
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">AUC</div>
+                    <div class="card-value">{float(metrics_row["auc"]):.2f}</div>
+                </div>
+                """)
+
+            with m2:
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">Sensitivity</div>
+                    <div class="card-value">{float(metrics_row["recall_sensitivity"]):.2f}</div>
+                </div>
+                """)
+
+            with m3:
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">Specificity</div>
+                    <div class="card-value">{float(metrics_row["specificity"]):.2f}</div>
+                </div>
+                """)
+
+            with m4:
+                html_block(f"""
+                <div class="card">
+                    <div class="card-title">F1 Score</div>
+                    <div class="card-value">{float(metrics_row["f1_score"]):.2f}</div>
+                </div>
+                """)
+
+            metric_img_cols = st.columns(2)
+
+            with metric_img_cols[0]:
+                if os.path.exists(cm_path):
+                    st.image(
+                        cm_path,
+                        caption="Matriz de confusión",
+                        use_container_width=True
+                    )
+
+            with metric_img_cols[1]:
+                if os.path.exists(roc_path):
+                    st.image(
+                        roc_path,
+                        caption="Curva ROC",
+                        use_container_width=True
+                    )
+        else:
+            st.info("Aún no se encontraron métricas de evaluación para mostrar.")

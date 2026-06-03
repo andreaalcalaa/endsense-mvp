@@ -21,7 +21,7 @@ def run_patient_classification(
     target_size=(128, 128),
     roi_crop_size=160,
     threshold=0.55,
-    model_path="cnn_endometrioma_classifier.pth",
+    model_path="cnn_endometrioma_classifier_best.pth",
 ):
     mri_path = os.path.join(base_folder, f"{patient_id}_{sequence}.nii.gz")
     ut_path = os.path.join(base_folder, f"{patient_id}_ut_{rater}.nii.gz")
